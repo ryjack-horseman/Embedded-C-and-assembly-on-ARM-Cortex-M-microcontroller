@@ -28,6 +28,7 @@ void task2_handler(void);
 void task3_handler(void);
 void task4_handler(void);
 
+void init_scheduler_stack(uint32_t);
 void init_systick_timer(uint32_t);
 
 #define SIZE_TASK_STACK		1024U
@@ -51,7 +52,8 @@ void init_systick_timer(uint32_t);
 
 int main(void)
 {
-    /* Loop forever */
+    init_scheduler_stack(SCHD_STACK_START);
+
 	init_systick_timer(TICK_HZ);
 	for(;;);
 }
@@ -101,6 +103,14 @@ void init_systick_timer(uint32_t tick_hz){
 
 	//enable the systick
 	*pSCSR |= (1 << 0); //systick counter start
+}
+
+__attribute__((naked)) void init_scheduler_stack(uint32_t sched_top_of_stack){
+	//must be assembly instruction to set MSP, it is the only arg, so already in RO
+	__asm volatile("MSR MSP, %0" : : "r" (sched_top_of_stack) : );
+	//BX copies the value of LR into PC to return to the calling function, there is no prologue or epilogue by default
+	//should be read of "return from function call"
+	__asm volatile("BX LR");
 }
 
 void SysTick_Handler(void){
