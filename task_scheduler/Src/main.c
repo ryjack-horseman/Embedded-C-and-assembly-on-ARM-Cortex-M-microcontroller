@@ -214,7 +214,7 @@ void BusFault_Handler(void){
 	while(1);
 }
 
-void UsageFault_Handler(void){
-	printf("Exception : UsageFault\n");
+void HardFault_Handler(void){
+	printf("Exception : HardFault\n");
 	while(1);
 }
