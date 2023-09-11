@@ -149,6 +149,15 @@ uint32_t get_psp_value(void){
 	return psp_of_tasks[current_task];
 }
 
+void save_psp_value(uint32_t current_psp_value){
+	psp_of_tasks[current_task] = current_psp_value;
+}
+
+void update_next_task(void){
+	current_task++;
+	//round robin task scheduler
+	current_task %= MAX_TASKS;
+}
 __attribute__ ((naked)) void switch_sp_to_psp(void){
 	//init PSP with TASk1 stack start
 	//get the value of PSP of current task
@@ -166,6 +175,24 @@ __attribute__ ((naked)) void switch_sp_to_psp(void){
 
 
 void SysTick_Handler(void){
+	//Save the context of current task
+	//1 Get the current running task's PSP value
+	__asm volatile("MRS R0, PSP");
+	//2 using that PSP value, store SF2 (R4 to R11), the other ones are automatic
+	//R0 holds the new PSP value
+	__asm volatile("STMDB R0!, {R4-R11}");
+	//3 Save the current value of PSP, R0 already holds value
+	__asm volatile("BL save_psp_value");
+
+	//Retrieve the context of next task
+	//1 Decide next task to run
+	__asm volatile("BL update_next_task");
+	//2 get its past PSP pointer
+	__asm volatile("BL get_psp_value");
+	//3 using that PSP value retrieve SF2 (R4 to R11)
+	__asm volatile("LDMIA R0!, {R4-R11}");
+	//4 update PSP and exit
+	__asm volatile("MSR PSP, R0");
 
 }
 
