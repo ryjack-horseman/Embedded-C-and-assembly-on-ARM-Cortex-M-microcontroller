@@ -34,7 +34,10 @@ void task_delay(uint32_t tick_count);
 
 
 /* This variable tracks the current_task being executed on the CPU */
-uint8_t current_task = 0; //task1 is running
+uint8_t current_task = 1; //task1 is running
+
+/* This variable gets updated from systick handler for every systick interrupt */
+uint32_t g_tick_count = 0;
 
 /* This is a task control block carries private information of each task */
 typedef struct
@@ -69,14 +72,20 @@ int main(void)
 }
 
 
+void idle_task(void)
+{
+	while(1);
+}
+
+
 void task1_handler(void)
 {
 	while(1)
 	{
 		led_on(LED_GREEN);
-		delay(DELAY_COUNT_1S);
+		task_delay(1000);
 		led_off(LED_GREEN);
-		delay(DELAY_COUNT_1S);
+		task_delay(1000);
 	}
 
 }
@@ -86,9 +95,9 @@ void task2_handler(void)
 	while(1)
 	{
 		led_on(LED_ORANGE);
-		delay(DELAY_COUNT_500MS);
+		task_delay(500);
 		led_off(LED_ORANGE);
-		delay(DELAY_COUNT_500MS);
+		task_delay(500);
 	}
 
 }
@@ -98,9 +107,9 @@ void task3_handler(void)
 	while(1)
 	{
 		led_on(LED_BLUE);
-		delay(DELAY_COUNT_250MS);
+		task_delay(250);
 		led_off(LED_BLUE);
-		delay(DELAY_COUNT_250MS);
+		task_delay(250);
 	}
 
 }
@@ -111,9 +120,9 @@ void task4_handler(void)
 	while(1)
 	{
 		led_on(LED_RED);
-		delay(DELAY_COUNT_125MS);
+		task_delay(125);
 		led_off(LED_RED);
-		delay(DELAY_COUNT_125MS);
+		task_delay(125);
 	}
 
 
@@ -162,16 +171,19 @@ void init_tasks_stack(void)
 	user_tasks[1].current_state = TASK_READY_STATE;
 	user_tasks[2].current_state = TASK_READY_STATE;
 	user_tasks[3].current_state = TASK_READY_STATE;
+	user_tasks[4].current_state = TASK_READY_STATE;
 
-	user_tasks[0].psp_value = T1_STACK_START;
-	user_tasks[1].psp_value = T2_STACK_START;
-	user_tasks[2].psp_value = T3_STACK_START;
-	user_tasks[3].psp_value = T4_STACK_START;
+	user_tasks[0].psp_value = IDLE_STACK_START;
+	user_tasks[1].psp_value = T1_STACK_START;
+	user_tasks[2].psp_value = T2_STACK_START;
+	user_tasks[3].psp_value = T3_STACK_START;
+	user_tasks[4].psp_value = T4_STACK_START;
 
-	user_tasks[0].task_handler = task1_handler;
-	user_tasks[1].task_handler = task2_handler;
-	user_tasks[2].task_handler = task3_handler;
-	user_tasks[3].task_handler = task4_handler;
+	user_tasks[0].task_handler = idle_task;
+	user_tasks[1].task_handler = task1_handler;
+	user_tasks[2].task_handler = task2_handler;
+	user_tasks[3].task_handler = task3_handler;
+	user_tasks[4].task_handler = task4_handler;
 
 
 	uint32_t *pPSP;
@@ -228,8 +240,19 @@ void save_psp_value(uint32_t current_psp_value)
 
 void update_next_task(void)
 {
+	int state = TASK_BLOCKED_STATE;
+
+	for(int i= 0 ; i < (MAX_TASKS) ; i++)
+	{
 		current_task++;
 	    current_task %= MAX_TASKS;
+		state = user_tasks[current_task].current_state;
+		if( (state == TASK_READY_STATE) && (current_task != 0) )
+			break;
+	}
+
+	if(state != TASK_READY_STATE)
+		current_task = 0;
 }
 
 
@@ -251,7 +274,36 @@ __attribute__((naked)) void switch_sp_to_psp(void)
 	__asm volatile ("BX LR");
 }
 
-__attribute__((naked)) void  SysTick_Handler(void)
+
+void schedule(void)
+{
+	//pend the pendsv exception
+	uint32_t *pICSR = (uint32_t*)0xE000ED04;
+	*pICSR |= ( 1 << 28);
+
+}
+
+
+
+
+void task_delay(uint32_t tick_count)
+{
+	//disable interrupt
+	INTERRUPT_DISABLE();
+
+	if(current_task)
+	{
+	   user_tasks[current_task].block_count = g_tick_count + tick_count;
+	   user_tasks[current_task].current_state = TASK_BLOCKED_STATE;
+	   schedule();
+	}
+
+	//enable interrupt
+	INTERRUPT_ENABLE();
+}
+
+
+__attribute__((naked)) void PendSV_Handler(void)
 {
 
 	/*Save the context of current task */
@@ -285,6 +337,45 @@ __attribute__((naked)) void  SysTick_Handler(void)
 	__asm volatile("POP {LR}");
 
 	__asm volatile("BX LR");
+
+
+
+}
+
+
+void update_global_tick_count(void)
+{
+	g_tick_count++;
+}
+
+void unblock_tasks(void)
+{
+	for(int i = 1 ; i < MAX_TASKS ; i++)
+	{
+		if(user_tasks[i].current_state != TASK_READY_STATE)
+		{
+			if(user_tasks[i].block_count == g_tick_count)
+			{
+				user_tasks[i].current_state = TASK_READY_STATE;
+			}
+		}
+
+	}
+
+}
+
+
+void  SysTick_Handler(void)
+{
+
+	uint32_t *pICSR = (uint32_t*)0xE000ED04;
+
+    update_global_tick_count();
+
+    unblock_tasks();
+
+    //pend the pendsv exception
+    *pICSR |= ( 1 << 28);
 }
 
 //2. implement the fault handlers
