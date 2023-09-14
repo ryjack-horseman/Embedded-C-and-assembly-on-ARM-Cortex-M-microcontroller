@@ -14,6 +14,7 @@
 #include<stdio.h>
 #include<stdint.h>
 #include"main.h"
+#include "led.h"
 
 /* task handler function prototypes */
 void task1_handler(void); //This is task1
@@ -33,10 +34,19 @@ void task_delay(uint32_t tick_count);
 
 
 /* This variable tracks the current_task being executed on the CPU */
-uint8_t current_task = 1; //task1 is running
+uint8_t current_task = 0; //task1 is running
 
-uint32_t task_handlers[MAX_TASKS];
-uint32_t psp_of_tasks[MAX_TASKS];
+/* This is a task control block carries private information of each task */
+typedef struct
+{
+	uint32_t psp_value;
+	uint32_t block_count;
+	uint8_t  current_state;
+	void (*task_handler)(void);
+}TCB_t;
+
+/* Each task has its own TCB */
+TCB_t user_tasks[MAX_TASKS];
 
 int main(void)
 {
@@ -46,6 +56,8 @@ int main(void)
 	init_scheduler_stack(SCHED_STACK_START);
 
 	init_tasks_stack();
+
+	led_init_all();
 
 	init_systick_timer(TICK_HZ);
 
@@ -57,17 +69,14 @@ int main(void)
 }
 
 
-//void idle_task(void)
-//{
-//	while(1);
-//}
-
-
 void task1_handler(void)
 {
 	while(1)
 	{
-		printf("1\n");
+		led_on(LED_GREEN);
+		delay(DELAY_COUNT_1S);
+		led_off(LED_GREEN);
+		delay(DELAY_COUNT_1S);
 	}
 
 }
@@ -76,7 +85,10 @@ void task2_handler(void)
 {
 	while(1)
 	{
-		printf("2\n");
+		led_on(LED_ORANGE);
+		delay(DELAY_COUNT_500MS);
+		led_off(LED_ORANGE);
+		delay(DELAY_COUNT_500MS);
 	}
 
 }
@@ -85,7 +97,10 @@ void task3_handler(void)
 {
 	while(1)
 	{
-		printf("3\n");
+		led_on(LED_BLUE);
+		delay(DELAY_COUNT_250MS);
+		led_off(LED_BLUE);
+		delay(DELAY_COUNT_250MS);
 	}
 
 }
@@ -95,7 +110,10 @@ void task4_handler(void)
 {
 	while(1)
 	{
-		printf("4\n");
+		led_on(LED_RED);
+		delay(DELAY_COUNT_125MS);
+		led_off(LED_RED);
+		delay(DELAY_COUNT_125MS);
 	}
 
 
@@ -140,31 +158,33 @@ __attribute__((naked)) void init_scheduler_stack(uint32_t sched_top_of_stack)
 void init_tasks_stack(void)
 {
 
+	user_tasks[0].current_state = TASK_READY_STATE;
+	user_tasks[1].current_state = TASK_READY_STATE;
+	user_tasks[2].current_state = TASK_READY_STATE;
+	user_tasks[3].current_state = TASK_READY_STATE;
 
-	//psp_of_tasks[0] = IDLE_STACK_START;
-	psp_of_tasks[0] = T1_STACK_START;
-	psp_of_tasks[1] = T2_STACK_START;
-	psp_of_tasks[2] = T3_STACK_START;
-	psp_of_tasks[3] = T4_STACK_START;
+	user_tasks[0].psp_value = T1_STACK_START;
+	user_tasks[1].psp_value = T2_STACK_START;
+	user_tasks[2].psp_value = T3_STACK_START;
+	user_tasks[3].psp_value = T4_STACK_START;
 
-	//task_handlers[0]= (uint32_t)idle_task;
-	task_handlers[0] = (uint32_t)task1_handler;
-	task_handlers[1] =(uint32_t) task2_handler;
-	task_handlers[2] = (uint32_t)task3_handler;
-	task_handlers[3] = (uint32_t)task4_handler;
+	user_tasks[0].task_handler = task1_handler;
+	user_tasks[1].task_handler = task2_handler;
+	user_tasks[2].task_handler = task3_handler;
+	user_tasks[3].task_handler = task4_handler;
 
 
 	uint32_t *pPSP;
 
 	for(int i = 0 ; i < MAX_TASKS ;i++)
 	{
-		pPSP = (uint32_t*) psp_of_tasks[i];
+		pPSP = (uint32_t*) user_tasks[i].psp_value;
 
 		pPSP--;
 		*pPSP = DUMMY_XPSR;//0x01000000
 
 		pPSP--; //PC
-		*pPSP = (uint32_t) task_handlers[i];
+		*pPSP = (uint32_t) user_tasks[i].task_handler;
 
 		pPSP--; //LR
 		*pPSP = 0xFFFFFFFD;
@@ -176,7 +196,7 @@ void init_tasks_stack(void)
 
 		}
 
-		psp_of_tasks[i] = (uint32_t)pPSP;
+		user_tasks[i].psp_value = (uint32_t)pPSP;
 
 
 	}
@@ -196,13 +216,13 @@ void enable_processor_faults(void)
 uint32_t get_psp_value(void)
 {
 
-	return psp_of_tasks[current_task];
+	return user_tasks[current_task].psp_value;
 }
 
 
 void save_psp_value(uint32_t current_psp_value)
 {
-	psp_of_tasks[current_task] = current_psp_value;
+	user_tasks[current_task].psp_value = current_psp_value;
 }
 
 
@@ -231,8 +251,7 @@ __attribute__((naked)) void switch_sp_to_psp(void)
 	__asm volatile ("BX LR");
 }
 
-
-__attribute__((naked)) void SysTick_Handler(void)
+__attribute__((naked)) void  SysTick_Handler(void)
 {
 
 	/*Save the context of current task */
